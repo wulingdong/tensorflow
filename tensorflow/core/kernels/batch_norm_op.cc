@@ -28,6 +28,9 @@ namespace tensorflow {
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
 typedef Eigen::GpuDevice GPUDevice;
+#ifdef TENSORFLOW_USE_SYCL
+typedef Eigen::SyclDevice SYCLDevice;
+#endif  // TENSORFLOW_USE_SYCL
 
 template <typename Device, typename T>
 class BatchNormOp : public OpKernel {
@@ -115,13 +118,21 @@ class BatchNormGradOp : public OpKernel {
                                         out_backprop.shape().DebugString()));
 
     Tensor* dx = nullptr;
-    OP_REQUIRES_OK(context, context->allocate_output(0, input.shape(), &dx));
+    OP_REQUIRES_OK(context, context->forward_input_or_allocate_output(
+                                {0, 4}, 0, input.shape(), &dx));
     Tensor* dm = nullptr;
-    OP_REQUIRES_OK(context, context->allocate_output(1, mean.shape(), &dm));
+    OP_REQUIRES_OK(context, context->forward_input_or_allocate_output(
+                                {1}, 1, mean.shape(), &dm));
     Tensor* dv = nullptr;
-    OP_REQUIRES_OK(context, context->allocate_output(2, var.shape(), &dv));
+    OP_REQUIRES_OK(context, context->forward_input_or_allocate_output(
+                                {2}, 2, var.shape(), &dv));
     Tensor* db = nullptr;
-    OP_REQUIRES_OK(context, context->allocate_output(3, mean.shape(), &db));
+    if (scale_after_normalization_) {
+      OP_REQUIRES_OK(context, context->allocate_output(3, mean.shape(), &db));
+    } else {
+      OP_REQUIRES_OK(context, context->forward_input_or_allocate_output(
+                                  {3}, 3, mean.shape(), &db));
+    }
     Tensor* dg = nullptr;
     OP_REQUIRES_OK(context, context->allocate_output(4, gamma.shape(), &dg));
 
@@ -164,7 +175,7 @@ TF_CALL_float(REGISTER_KERNEL);
 TF_CALL_double(REGISTER_KERNEL);
 #undef REGISTER_KERNEL
 
-#if GOOGLE_CUDA
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 // Forward declarations of the functor specializations for GPU.
 namespace functor {
 #define DECLARE_GPU_SPEC(T)                                                  \
@@ -195,7 +206,19 @@ TF_CALL_half(REGISTER_GPU_KERNEL);
 TF_CALL_float(REGISTER_GPU_KERNEL);
 #undef REGISTER_GPU_KERNEL
 
-#endif  // GOOGLE_CUDA
+#endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+
+#if TENSORFLOW_USE_SYCL
+#define REGISTER_KERNEL(T)                                         \
+  REGISTER_KERNEL_BUILDER(Name("BatchNormWithGlobalNormalization") \
+                              .Device(DEVICE_SYCL)                 \
+                              .TypeConstraint<T>("T"),             \
+                          BatchNormOp<SYCLDevice, T>);
+
+TF_CALL_float(REGISTER_KERNEL);
+TF_CALL_double(REGISTER_KERNEL);
+#undef REGISTER_KERNEL
+#endif  // TENSORFLOW_USE_SYCL
 
 #define REGISTER_KERNEL(T)                                             \
   REGISTER_KERNEL_BUILDER(Name("BatchNormWithGlobalNormalizationGrad") \
@@ -208,7 +231,7 @@ TF_CALL_float(REGISTER_KERNEL);
 TF_CALL_double(REGISTER_KERNEL);
 #undef REGISTER_KERNEL
 
-#if GOOGLE_CUDA
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 // Forward declarations of the functor specializations for GPU.
 namespace functor {
 #define DECLARE_GPU_SPEC(T)                                                \
@@ -242,6 +265,19 @@ TF_CALL_half(REGISTER_GPU_KERNEL);
 TF_CALL_float(REGISTER_GPU_KERNEL);
 #undef REGISTER_GPU_KERNEL
 
-#endif  // GOOGLE_CUDA
+#endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+
+#if TENSORFLOW_USE_SYCL
+#define REGISTER_KERNEL(T)                                             \
+  REGISTER_KERNEL_BUILDER(Name("BatchNormWithGlobalNormalizationGrad") \
+                              .Device(DEVICE_SYCL)                     \
+                              .TypeConstraint<T>("T"),                 \
+                          BatchNormGradOp<SYCLDevice, T>);
+
+TF_CALL_float(REGISTER_KERNEL);
+TF_CALL_double(REGISTER_KERNEL);
+#undef REGISTER_KERNEL
+
+#endif  // TENSORFLOW_USE_SYCL
 
 }  // namespace tensorflow

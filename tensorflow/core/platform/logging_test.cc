@@ -24,6 +24,8 @@ TEST(Logging, Log) {
   LOG(ERROR) << "Error message";
   VLOG(1) << "A VLOG message";
   VLOG(2) << "A higher VLOG message";
+  DVLOG(1) << "A DVLOG message";
+  DVLOG(2) << "A higher DVLOG message";
 }
 
 TEST(Logging, CheckChecks) {
@@ -86,6 +88,12 @@ TEST(LoggingDeathTest, FailedChecks) {
   ASSERT_DEATH(DCHECK_LT(3, 2), "3 < 2");
   ASSERT_DEATH(DCHECK_LE(3, 2), "3 <= 2");
 #endif
+}
+
+TEST(InternalLogString, Basic) {
+  // Just make sure that this code compiles (we don't actually verify
+  // the output)
+  internal::LogString(__FILE__, __LINE__, INFO, "Hello there");
 }
 
 }  // namespace tensorflow

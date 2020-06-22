@@ -13,23 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef THIRD_PARTY_TENSORFLOW_CORE_LIB_IO_COMPRESSED_OUTPUTBUFFER_H_
-#define THIRD_PARTY_TENSORFLOW_CORE_LIB_IO_COMPRESSED_OUTPUTBUFFER_H_
+#ifndef TENSORFLOW_CORE_LIB_IO_COMPRESSED_OUTPUTBUFFER_H_
+#define TENSORFLOW_CORE_LIB_IO_COMPRESSED_OUTPUTBUFFER_H_
+
+#include <zlib.h>
 
 #include <string>
+
 #include "tensorflow/core/lib/core/status.h"
+#include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/lib/io/zlib_compression_options.h"
 #include "tensorflow/core/platform/env.h"
+#include "tensorflow/core/platform/file_system.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/types.h"
-
-// TODO(srbs|vrv): Move to a platform/zlib.h file to centralize all
-// platform-specific includes.
-#ifdef __ANDROID__
-#include "zlib.h"
-#else
-#include <zlib.h>
-#endif  // __ANDROID__
 
 namespace tensorflow {
 namespace io {
@@ -38,13 +35,14 @@ namespace io {
 // (http://www.zlib.net/).
 // A given instance of an ZlibOutputBuffer is NOT safe for concurrent use
 // by multiple threads
-class ZlibOutputBuffer {
+class ZlibOutputBuffer : public WritableFile {
  public:
   // Create an ZlibOutputBuffer for `file` with two buffers that cache the
   // 1. input data to be deflated
   // 2. the deflated output
   // with sizes `input_buffer_bytes` and `output_buffer_bytes` respectively.
   // Does not take ownership of `file`.
+  // output_buffer_bytes should be greater than 1.
   ZlibOutputBuffer(
       WritableFile* file,
       int32 input_buffer_bytes,   // size of z_stream.next_in buffer
@@ -52,6 +50,10 @@ class ZlibOutputBuffer {
       const ZlibCompressionOptions& zlib_options);
 
   ~ZlibOutputBuffer();
+
+  // Initializes some state necessary for the output buffer. This call is
+  // required before any other operation on the buffer.
+  Status Init();
 
   // Adds `data` to the compression pipeline.
   //
@@ -61,10 +63,14 @@ class ZlibOutputBuffer {
   // to file when the buffer is full.
   //
   // To immediately write contents to file call `Flush()`.
-  Status Write(StringPiece data);
+  Status Append(StringPiece data) override;
+
+#if defined(PLATFORM_GOOGLE)
+  Status Append(const absl::Cord& cord) override;
+#endif
 
   // Deflates any cached input and writes all output to file.
-  Status Flush();
+  Status Flush() override;
 
   // Compresses any cached input and writes all output to file. This must be
   // called before the destructor to avoid any data loss.
@@ -74,10 +80,21 @@ class ZlibOutputBuffer {
   //
   // After calling this, any further calls to `Write()`, `Flush()` or `Close()`
   // will fail.
-  Status Close();
+  Status Close() override;
+
+  // Returns the name of the underlying file.
+  Status Name(StringPiece* result) const override;
+
+  // Deflates any cached input, writes all output to file and syncs it.
+  Status Sync() override;
+
+  // Returns the write position in the underlying file. The position does not
+  // reflect buffered, un-flushed data.
+  Status Tell(int64* position) override;
 
  private:
   WritableFile* file_;  // Not owned
+  Status init_status_;
   size_t input_buffer_capacity_;
   size_t output_buffer_capacity_;
 
@@ -119,7 +136,7 @@ class ZlibOutputBuffer {
   //
   // Note: This method does not flush contents to file.
   // Returns non-ok status if writing contents to file fails.
-  Status DeflateBuffered(bool last = false);
+  Status DeflateBuffered(int flush_mode);
 
   // Appends contents of `z_stream_output_` to `file_`.
   // Returns non-OK status if writing to file fails.
@@ -138,4 +155,4 @@ class ZlibOutputBuffer {
 }  // namespace io
 }  // namespace tensorflow
 
-#endif  // THIRD_PARTY_TENSORFLOW_CORE_LIB_IO_COMPRESSED_OUTPUTBUFFER_H_
+#endif  // TENSORFLOW_CORE_LIB_IO_COMPRESSED_OUTPUTBUFFER_H_

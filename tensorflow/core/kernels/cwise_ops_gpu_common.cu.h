@@ -13,17 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#if !GOOGLE_CUDA
-#error This file must only be included when building with Cuda support
+#if !GOOGLE_CUDA && !TENSORFLOW_USE_ROCM
+#error This file must only be included when building with Cuda or ROCm support
 #endif
 
-#ifndef TENSORFLOW_KERNELS_CWISE_OPS_GPU_COMMON_CU_H_
-#define TENSORFLOW_KERNELS_CWISE_OPS_GPU_COMMON_CU_H_
+#ifndef TENSORFLOW_CORE_KERNELS_CWISE_OPS_GPU_COMMON_CU_H_
+#define TENSORFLOW_CORE_KERNELS_CWISE_OPS_GPU_COMMON_CU_H_
 
-#define EIGEN_USE_GPU
-
+#define _USE_MATH_DEFINES
+#include <cmath>
 #include <complex>
 
+#define EIGEN_USE_GPU
 #include "tensorflow/core/framework/tensor_types.h"
 #include "tensorflow/core/kernels/cwise_ops.h"
 #include "tensorflow/core/platform/types.h"
@@ -104,6 +105,17 @@ struct BinaryFunctor<GPUDevice, Functor, NDIMS, has_errors> {
   }
 };
 
+// Partial specialization of ApproximateEqual<Device=GPUDevice, T>.
+template <typename T>
+struct ApproximateEqual<GPUDevice, T> {
+  void operator()(const GPUDevice& d, typename TTypes<T>::ConstFlat x,
+                  typename TTypes<T>::ConstFlat y, T tolerance,
+                  typename TTypes<bool>::Flat z) {
+    auto diff = x - y;
+    z.device(d) = diff.abs() <= tolerance;
+  }
+};
+
 // Macros to explicitly instantiate kernels on GPU for multiple types
 // (T0, T1, etc.) for UnaryFunctor (e.g., functor::sqrt).
 #define DEFINE_UNARY1(F, T) template struct UnaryFunctor<GPUDevice, F<T> >
@@ -119,13 +131,24 @@ struct BinaryFunctor<GPUDevice, Functor, NDIMS, has_errors> {
 #define DEFINE_UNARY5(F, T0, T1, T2, T3, T4) \
   DEFINE_UNARY2(F, T0, T1);                  \
   DEFINE_UNARY3(F, T2, T3, T4)
+#define DEFINE_UNARY6(F, T0, T1, T2, T3, T4, T5) \
+  DEFINE_UNARY2(F, T0, T1);                      \
+  DEFINE_UNARY4(F, T2, T3, T4, T5)
+#define DEFINE_UNARY7(F, T0, T1, T2, T3, T4, T5, T6) \
+  DEFINE_UNARY2(F, T0, T1);                          \
+  DEFINE_UNARY5(F, T2, T3, T4, T5, T6)
+#define DEFINE_UNARY8(F, T0, T1, T2, T3, T4, T5, T6, T7) \
+  DEFINE_UNARY4(F, T0, T1, T2, T3);                      \
+  DEFINE_UNARY4(F, T4, T5, T6, T7)
 
 // Macros to explicitly instantiate kernels on GPU for multiple types
 // (T0, T1, etc.) for BinaryFunctor.
 #define DEFINE_BINARY1(F, T)                         \
   template struct BinaryFunctor<GPUDevice, F<T>, 1>; \
   template struct BinaryFunctor<GPUDevice, F<T>, 2>; \
-  template struct BinaryFunctor<GPUDevice, F<T>, 3>
+  template struct BinaryFunctor<GPUDevice, F<T>, 3>; \
+  template struct BinaryFunctor<GPUDevice, F<T>, 4>; \
+  template struct BinaryFunctor<GPUDevice, F<T>, 5>
 #define DEFINE_BINARY2(F, T0, T1) \
   DEFINE_BINARY1(F, T0);          \
   DEFINE_BINARY1(F, T1)
@@ -153,8 +176,17 @@ struct BinaryFunctor<GPUDevice, Functor, NDIMS, has_errors> {
 #define DEFINE_BINARY10(F, T0, T1, T2, T3, T4, T5, T6, T7, T8, T9) \
   DEFINE_BINARY5(F, T0, T1, T2, T3, T4);                           \
   DEFINE_BINARY5(F, T5, T6, T7, T8, T9)
+#define DEFINE_BINARY11(F, T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10) \
+  DEFINE_BINARY5(F, T0, T1, T2, T3, T4);                                \
+  DEFINE_BINARY6(F, T5, T6, T7, T8, T9, T10)
+
+#define DEFINE_APPROXIMATE_EQUAL1(T) \
+  template struct ApproximateEqual<GPUDevice, T>;
+#define DEFINE_APPROXIMATE_EQUAL2(T0, T1) \
+  DEFINE_APPROXIMATE_EQUAL1(T0);          \
+  DEFINE_APPROXIMATE_EQUAL1(T1);
 
 }  // end namespace functor
 }  // end namespace tensorflow
 
-#endif  // TENSORFLOW_KERNELS_CWISE_OPS_GPU_COMMON_CU_H_
+#endif  // TENSORFLOW_CORE_KERNELS_CWISE_OPS_GPU_COMMON_CU_H_

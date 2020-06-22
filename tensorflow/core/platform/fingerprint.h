@@ -16,7 +16,18 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_PLATFORM_FINGERPRINT_H_
 #define TENSORFLOW_CORE_PLATFORM_FINGERPRINT_H_
 
+#include "tensorflow/core/platform/stringpiece.h"
 #include "tensorflow/core/platform/types.h"
+
+// The following line is used by copybara to set or unset the USE_OSS_FARMHASH
+// preprocessor symbol as needed. Please do not remove.
+#define USE_OSS_FARMHASH
+
+#ifdef USE_OSS_FARMHASH
+#include <farmhash.h>
+#else
+#include "util/hash/farmhash_fingerprint.h"
+#endif
 
 namespace tensorflow {
 
@@ -36,22 +47,61 @@ struct Fprint128Hasher {
   }
 };
 
-// TODO(sibyl-Mooth6ku): Change these to accept StringPiece (or make them templated
-// on any kind of byte array?).
+namespace internal {
+// Mixes some of the bits that got propagated to the high bits back into the
+// low bits.
+inline uint64 ShiftMix(const uint64 val) { return val ^ (val >> 47); }
+}  // namespace internal
+
+// This concatenates two 64-bit fingerprints. It is a convenience function to
+// get a fingerprint for a combination of already fingerprinted components. For
+// example this code is used to concatenate the hashes from each of the features
+// on sparse crosses.
+//
+// One shouldn't expect FingerprintCat64(Fingerprint64(x), Fingerprint64(y))
+// to indicate anything about FingerprintCat64(StrCat(x, y)). This operation
+// is not commutative.
+//
+// From a security standpoint, we don't encourage this pattern to be used
+// for everything as it is vulnerable to length-extension attacks and it
+// is easier to compute multicollisions.
+inline uint64 FingerprintCat64(const uint64 fp1, const uint64 fp2) {
+  static const uint64 kMul = 0xc6a4a7935bd1e995ULL;
+  uint64 result = fp1 ^ kMul;
+  result ^= internal::ShiftMix(fp2 * kMul) * kMul;
+  result *= kMul;
+  result = internal::ShiftMix(result) * kMul;
+  result = internal::ShiftMix(result);
+  return result;
+}
 
 // This is a portable fingerprint interface for strings that will never change.
 // However, it is not suitable for cryptography.
-uint64 Fingerprint64(const string& s);
+inline uint64 Fingerprint64(const StringPiece s) {
+#ifdef USE_OSS_FARMHASH
+  return ::util::Fingerprint64(s.data(), s.size());
+#else
+  // Fingerprint op depends on the fact that Fingerprint64() is implemented by
+  // Farmhash. If the implementation ever changes, Fingerprint op should be
+  // modified to keep using Farmhash.
+  // LINT.IfChange
+  return farmhash::Fingerprint64(s.data(), s.size());
+  // LINT.ThenChange(//third_party/tensorflow/core/kernels/fingerprint_op.cc)
+#endif
+}
 
 // 128-bit variant of Fingerprint64 above (same properties and caveats apply).
-Fprint128 Fingerprint128(const string& s);
+inline Fprint128 Fingerprint128(const StringPiece s) {
+#ifdef USE_OSS_FARMHASH
+  const auto fingerprint = ::util::Fingerprint128(s.data(), s.size());
+  return {::util::Uint128Low64(fingerprint),
+          ::util::Uint128High64(fingerprint)};
+#else
+  const auto fingerprint = farmhash::Fingerprint128(s.data(), s.size());
+  return {absl::Uint128Low64(fingerprint), absl::Uint128High64(fingerprint)};
+#endif
+}
 
 }  // namespace tensorflow
-
-#if defined(PLATFORM_GOOGLE)
-#include "tensorflow/core/platform/google/fingerprint.h"
-#else
-#include "tensorflow/core/platform/default/fingerprint.h"
-#endif
 
 #endif  // TENSORFLOW_CORE_PLATFORM_FINGERPRINT_H_

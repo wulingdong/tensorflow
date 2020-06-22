@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,12 +19,15 @@ limitations under the License.
 #define EIGEN_USE_THREADS
 
 #include "tensorflow/core/kernels/extract_image_patches_op.h"
+
 #include <vector>
+
+#include "tensorflow/core/framework/bounds_check.h"
+#include "tensorflow/core/framework/kernel_shape_util.h"
 #include "tensorflow/core/framework/numeric_op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/tensor.h"
-#include "tensorflow/core/kernels/bounds_check.h"
 #include "tensorflow/core/kernels/ops_util.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/platform/logging.h"
@@ -42,9 +45,9 @@ static inline void ParseAttributeVec4(OpKernelConstruction* context,
   OP_REQUIRES_OK(context, context->GetAttr(attr_name, attr));
   OP_REQUIRES(
       context, (*attr)[0] == 1 && (*attr)[3] == 1,
-      errors::Unimplemented("Only support", attr_name, "across space."));
+      errors::Unimplemented("Only support ", attr_name, " across space."));
   OP_REQUIRES(context, (*attr)[1] >= 1 && (*attr)[2] >= 1,
-              errors::OutOfRange(attr_name, "is out of range."));
+              errors::OutOfRange(attr_name, " is out of range."));
 }
 
 template <typename Device, typename T>
@@ -126,11 +129,12 @@ class ExtractImagePatchesOp : public UnaryOp<T> {
       Name("ExtractImagePatches").Device(DEVICE_CPU).TypeConstraint<T>("T"), \
       ExtractImagePatchesOp<CPUDevice, T>);
 
-TF_CALL_REAL_NUMBER_TYPES(REGISTER);
+TF_CALL_NUMBER_TYPES(REGISTER);
 
 #undef REGISTER
 
-#if GOOGLE_CUDA
+#if (defined(GOOGLE_CUDA) && GOOGLE_CUDA) || \
+    (defined(TENSORFLOW_USE_ROCM) && TENSORFLOW_USE_ROCM)
 
 // Forward declarations of the functor specializations for GPU.
 namespace functor {
@@ -144,7 +148,7 @@ namespace functor {
       typename TTypes<T, 4>::Tensor output);                            \
   extern template struct ExtractImagePatchesForward<GPUDevice, T>;
 
-TF_CALL_GPU_NUMBER_TYPES(DECLARE_GPU_SPEC);
+TF_CALL_GPU_ALL_TYPES(DECLARE_GPU_SPEC);
 
 #undef DECLARE_GPU_SPEC
 
@@ -156,10 +160,10 @@ TF_CALL_GPU_NUMBER_TYPES(DECLARE_GPU_SPEC);
       Name("ExtractImagePatches").Device(DEVICE_GPU).TypeConstraint<T>("T"), \
       ExtractImagePatchesOp<GPUDevice, T>);
 
-TF_CALL_GPU_NUMBER_TYPES(REGISTER);
+TF_CALL_GPU_ALL_TYPES(REGISTER);
 
 #undef REGISTER
 
-#endif  // GOOGLE_CUDA
+#endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
 }  // namespace tensorflow

@@ -21,68 +21,73 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import tensorflow as tf
 
+import tensorflow as tf
 """
 
 import ctypes
-import inspect
+import importlib
 import sys
 import traceback
+
+# We aim to keep this file minimal and ideally remove completely.
+# If you are adding a new file with @tf_export decorators,
+# import it in modules_with_exports.py instead.
 
 # go/tf-wildcard-import
 # pylint: disable=wildcard-import,g-bad-import-order,g-import-not-at-top
 
-# pywrap_tensorflow is a SWIG generated python library that dynamically loads
-# _pywrap_tensorflow.so. The default mode for loading keeps all the symbol
-# private and not visible to other libraries that may be loaded. Setting
-# the mode to RTLD_GLOBAL to make the symbols visible, so libraries such
-# as the ones implementing custom ops can have access to tensorflow
-# framework's symbols.
-# one catch is that numpy *must* be imported before the call to
-# setdlopenflags(), or there is a risk that later c modules will segfault
-# when importing numpy (gh-2034).
-import numpy as np
-_default_dlopen_flags = sys.getdlopenflags()
-sys.setdlopenflags(_default_dlopen_flags | ctypes.RTLD_GLOBAL)
-from tensorflow.python import pywrap_tensorflow
-sys.setdlopenflags(_default_dlopen_flags)
+from tensorflow.python.eager import context
 
-try:
-  from tensorflow.core.framework.graph_pb2 import *
-except ImportError:
-  msg = """%s\n\nError importing tensorflow.  Unless you are using bazel,
-you should not try to import tensorflow from its source directory;
-please exit the tensorflow source tree, and relaunch your python interpreter
-from there.""" % traceback.format_exc()
-  raise ImportError(msg)
+# pylint: enable=wildcard-import
 
-from tensorflow.core.framework.summary_pb2 import *
-from tensorflow.core.framework.attr_value_pb2 import *
-from tensorflow.core.protobuf.config_pb2 import *
-from tensorflow.core.util.event_pb2 import *
-# Import things out of contrib
-import tensorflow.contrib as contrib
-
-# Framework
-from tensorflow.python.framework.framework_lib import *
-from tensorflow.python.framework.versions import *
-from tensorflow.python.framework import errors
-
-# Session
-from tensorflow.python.client.client_lib import *
-
-# Ops
-from tensorflow.python.ops.standard_ops import *
-
-# Bring in subpackages
-from tensorflow.python.ops import nn
+# Bring in subpackages.
+from tensorflow.python import data
+from tensorflow.python import distribute
+from tensorflow.python import keras
+from tensorflow.python.feature_column import feature_column_lib as feature_column
+from tensorflow.python.layers import layers
+from tensorflow.python.module import module
+from tensorflow.python.ops import bincount_ops
+from tensorflow.python.ops import bitwise_ops as bitwise
+from tensorflow.python.ops import gradient_checker_v2
 from tensorflow.python.ops import image_ops as image
+from tensorflow.python.ops import manip_ops as manip
+from tensorflow.python.ops import metrics
+from tensorflow.python.ops import nn
+from tensorflow.python.ops import ragged
+from tensorflow.python.ops import sets
+from tensorflow.python.ops import stateful_random_ops
+from tensorflow.python.ops.distributions import distributions
+from tensorflow.python.ops.linalg import linalg
+from tensorflow.python.ops.linalg.sparse import sparse
+from tensorflow.python.ops.losses import losses
+from tensorflow.python.ops.ragged import ragged_ops as _ragged_ops
+from tensorflow.python.ops.signal import signal
+from tensorflow.python.profiler import profiler
+from tensorflow.python.profiler import profiler_client
+from tensorflow.python.profiler import profiler_v2
+from tensorflow.python.profiler import trace
+from tensorflow.python.saved_model import saved_model
+from tensorflow.python.summary import summary
+from tensorflow.python.tpu import api
 from tensorflow.python.user_ops import user_ops
 from tensorflow.python.util import compat
 
+# Update the RaggedTensor package docs w/ a list of ops that support dispatch.
+ragged.__doc__ += _ragged_ops.ragged_dispatch.ragged_op_list()
+
+# Import to make sure the ops are registered.
+from tensorflow.python.ops import gen_audio_ops
+from tensorflow.python.ops import gen_boosted_trees_ops
+from tensorflow.python.ops import gen_cudnn_rnn_ops
+from tensorflow.python.ops import gen_rnn_ops
+from tensorflow.python.ops import gen_sendrecv_ops
+from tensorflow.python.ops import gen_tpu_ops
+
 # Import the names from python/training.py as train.Name.
 from tensorflow.python.training import training as train
+from tensorflow.python.training import quantize_training as _quantize_training
 
 # Sub-package for performing i/o directly instead of via ops in a graph.
 from tensorflow.python.lib.io import python_io
@@ -96,152 +101,63 @@ from tensorflow.python.platform import resource_loader
 from tensorflow.python.platform import sysconfig
 from tensorflow.python.platform import test
 
+from tensorflow.python.compat import v2_compat
+
 from tensorflow.python.util.all_util import make_all
+from tensorflow.python.util.tf_export import tf_export
 
-# Import modules whose docstrings contribute, for use by make_all below.
-from tensorflow.python.client import client_lib
-from tensorflow.python.framework import constant_op
-from tensorflow.python.framework import framework_lib
-from tensorflow.python.ops import array_ops
-from tensorflow.python.ops import check_ops
-from tensorflow.python.ops import control_flow_ops
-from tensorflow.python.ops import functional_ops
-from tensorflow.python.ops import histogram_ops
-from tensorflow.python.ops import io_ops
-from tensorflow.python.ops import math_ops
-from tensorflow.python.ops import script_ops
-from tensorflow.python.ops import session_ops
-from tensorflow.python.ops import sparse_ops
-from tensorflow.python.ops import state_ops
-from tensorflow.python.ops import string_ops
-from tensorflow.python.ops import tensor_array_ops
+# Eager execution
+from tensorflow.python.eager.context import executing_eagerly
+from tensorflow.python.eager.remote import connect_to_remote_host
+from tensorflow.python.eager.def_function import function
+from tensorflow.python.framework.ops import enable_eager_execution
 
-# Don't export modules except for the few we really want
-_whitelist = set([app, compat, contrib, errors, flags, gfile, image, logging,
-                  nn, python_io, resource_loader, sysconfig, test, train,
-                  user_ops])
+# Check whether TF2_BEHAVIOR is turned on.
+from tensorflow.python.eager import monitoring as _monitoring
+from tensorflow.python import tf2 as _tf2
+_tf2_gauge = _monitoring.BoolGauge(
+    '/tensorflow/api/tf2_enable', 'Environment variable TF2_BEHAVIOR is set".')
+_tf2_gauge.get_cell().set(_tf2.enabled())
 
-# Export all symbols directly accessible from 'tf.' by drawing on the doc
-# strings of other modules.
-__all__ = make_all(__name__, [framework_lib, array_ops, client_lib, check_ops,
-                              constant_op, control_flow_ops, functional_ops,
-                              histogram_ops, io_ops, math_ops, nn, script_ops,
-                              session_ops, sparse_ops, state_ops, string_ops,
-                              tensor_array_ops, train])
+# Necessary for the symbols in this module to be taken into account by
+# the namespace management system (API decorators).
+from tensorflow.python.ops import rnn
+from tensorflow.python.ops import rnn_cell
 
-# Symbols whitelisted for export without documentation.
-# TODO(cwhipkey): review these and move to contrib, expose through
-# documentation, or remove.
-__all__.extend([
-    'AttrValue',
-    'ConfigProto',
-    'DeviceSpec',
-    'Event',
-    'GPUOptions',
-    'GRAPH_DEF_VERSION',
-    'GRAPH_DEF_VERSION_MIN_CONSUMER',
-    'GRAPH_DEF_VERSION_MIN_PRODUCER',
-    'GraphDef',
-    'GraphOptions',
-    'HistogramProto',
-    'LogMessage',
-    'NameAttrList',
-    'NodeDef',
-    'OptimizerOptions',
-    'RunOptions',
-    'RunMetadata',
-    'SessionLog',
-    'Summary',
-    'arg_max',
-    'arg_min',
-    'assign',
-    'assign_add',
-    'assign_sub',
-    'bitcast',
-    'bytes',
-    'compat',
-    'create_partitioned_variables',
-    'deserialize_many_sparse',
-    'initialize_all_tables',
-    'lin_space',
-    'list_diff',
-    'parse_single_sequence_example',
-    'py_func',
-    'scalar_mul',
-    'serialize_many_sparse',
-    'serialize_sparse',
-    'shape_n',
-    'sparse_matmul',
-    'sparse_segment_mean_grad',
-    'sparse_segment_sqrt_n_grad',
-    'unique_with_counts',
-    'user_ops',
+# TensorFlow Debugger (tfdbg).
+from tensorflow.python.debug.lib import check_numerics_callback
+from tensorflow.python.debug.lib import dumping_callback
+from tensorflow.python.ops import gen_debug_ops
+
+# DLPack
+from tensorflow.python.dlpack.dlpack import from_dlpack
+from tensorflow.python.dlpack.dlpack import to_dlpack
+
+# XLA JIT compiler APIs.
+from tensorflow.python.compiler.xla import jit
+from tensorflow.python.compiler.xla import xla
+
+# MLIR APIs.
+from tensorflow.python.compiler.mlir import mlir
+
+# Required due to `rnn` and `rnn_cell` not being imported in `nn` directly
+# (due to a circular dependency issue: rnn depends on layers).
+nn.dynamic_rnn = rnn.dynamic_rnn
+nn.static_rnn = rnn.static_rnn
+nn.raw_rnn = rnn.raw_rnn
+nn.bidirectional_dynamic_rnn = rnn.bidirectional_dynamic_rnn
+nn.static_state_saving_rnn = rnn.static_state_saving_rnn
+nn.rnn_cell = rnn_cell
+
+# Special dunders that we choose to export:
+_exported_dunders = set([
+    '__version__',
+    '__git_version__',
+    '__compiler_version__',
+    '__cxx11_abi_flag__',
+    '__monolithic_build__',
 ])
 
-# Dtypes exported by framework/dtypes.py.
-# TODO(cwhipkey): expose these through documentation.
-__all__.extend([
-    'QUANTIZED_DTYPES',
-    'bfloat16',
-    'bfloat16_ref',
-    'bool',
-    'bool_ref',
-    'complex64',
-    'complex64_ref',
-    'complex128',
-    'complex128_ref',
-    'double',
-    'double_ref',
-    'half',
-    'half_ref',
-    'float16',
-    'float16_ref',
-    'float32',
-    'float32_ref',
-    'float64',
-    'float64_ref',
-    'int16',
-    'int16_ref',
-    'int32',
-    'int32_ref',
-    'int64',
-    'int64_ref',
-    'int8',
-    'int8_ref',
-    'qint16',
-    'qint16_ref',
-    'qint32',
-    'qint32_ref',
-    'qint8',
-    'qint8_ref',
-    'quint16',
-    'quint16_ref',
-    'quint8',
-    'quint8_ref',
-    'string',
-    'string_ref',
-    'uint16',
-    'uint16_ref',
-    'uint8',
-    'uint8_ref',
-])
-
-# Export modules and constants.
-__all__.extend([
-    'app',
-    'contrib',
-    'errors',
-    'flags',
-    'gfile',
-    'image',
-    'logging',
-    'newaxis',
-    'nn',
-    'python_io',
-    'resource_loader',
-    'sysconfig',
-    'test',
-    'train',
-])
-
-__all__.append('__version__')
+# Expose symbols minus dunders, unless they are whitelisted above.
+# This is necessary to export our dunders.
+__all__ = [s for s in dir() if s in _exported_dunders or not s.startswith('_')]

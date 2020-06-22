@@ -16,19 +16,14 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_PLATFORM_JPEG_H_
 #define TENSORFLOW_CORE_PLATFORM_JPEG_H_
 
-#include "tensorflow/core/platform/platform.h"
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
 
-#if defined(PLATFORM_GOOGLE)
-#include "tensorflow/core/platform/google/build_config/jpeg.h"
-#elif defined(PLATFORM_POSIX) && !defined(IS_MOBILE_PLATFORM)
 extern "C" {
-#include "jpeg-9a/jerror.h"
-#include "jpeg-9a/jinclude.h"
-#include "jpeg-9a/jpeglib.h"
-#include "jpeg-9a/transupp.h"  // for rotations
+#include "jerror.h"  // from @libjpeg_turbo
+#include "jpeglib.h"  // from @libjpeg_turbo
 }
-#else
-#error Define the appropriate PLATFORM_<foo> macro for this platform
-#endif
 
 #endif  // TENSORFLOW_CORE_PLATFORM_JPEG_H_
